@@ -48,6 +48,17 @@ abstract contract AbstractOptimisticIsm is IOptimisticIsm {
     function markFraudulent(address ism) external virtual;
 
     /**
+     * @notice Returns whether an address is a watcher for a given message
+     * @param _message Formatted Hyperlane message (see Message.sol).
+     * @param _watcher The address to check
+     */
+    function isWatcher(bytes calldata _message, address _watcher)
+        public
+        view
+        virtual
+        returns (bool);
+
+    /**
      * @notice Returns the list of watchers and threshold used for this optimistic ISM
      * @param _message Formatted Hyperlane message (see Message.sol).
      * @return watchers The list of watchers
@@ -95,6 +106,10 @@ abstract contract AbstractOptimisticIsm is IOptimisticIsm {
         returns (bool)
     {
         IInterchainSecurityModule _submodule = submodule(_message);
+        require(
+            _submodule != IInterchainSecurityModule(address(0)),
+            "!submodule"
+        );
         bytes32 _id = Message.id(_message);
         PreVerificationData memory _pvd = preVerification[_id];
         require(_pvd.submodule == address(0), "preVerified");

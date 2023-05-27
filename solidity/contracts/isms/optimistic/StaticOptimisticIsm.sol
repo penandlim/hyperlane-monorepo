@@ -24,13 +24,11 @@ abstract contract AbstractMetaProxyOptimisticIsm is AbstractOptimisticIsm {
 
 contract StaticOptimisticIsm is
     AbstractMetaProxyOptimisticIsm,
-    OwnableUpgradeable,
-    AccessControlUpgradeable
+    OwnableUpgradeable
 {
     // ============ Public Storage ============
-    // Storage for the constant Opt-ISM Watcher role's identifier
-    bytes32 public constant OPTIMISTIC_ISM_WATCHER_ROLE =
-        keccak256("OPTIMISTIC_ISM_WATCHER_ROLE");
+    uint96 public constant MAX_FRAUD_WINDOW = 30 days;
+    uint96 public constant MIN_FRAUD_WINDOW = 1 days;
 
     // The address of the static Interchain Security Module
     address public staticModule;
@@ -38,9 +36,13 @@ contract StaticOptimisticIsm is
     // The length of the static fraud window
     uint96 public staticFraudWindow;
 
+    // mapping of addresses to whether they are a watcher
+    mapping(address => bool) private _isWatcher;
+
     // ============ Events ============
     event SubmoduleSet(address ism);
     event FraudWindowSet(uint256 fraudWindow);
+    event MarkedFraudulent(address indexed ism, address indexed watcher);
 
     // ============ Initializer ============
 
@@ -63,13 +65,13 @@ contract StaticOptimisticIsm is
         // Set up access control
         (address[] memory watchers, ) = this.watchersAndThreshold("");
         for (uint256 i = 0; i < watchers.length; i++) {
-            _setupRole(OPTIMISTIC_ISM_WATCHER_ROLE, watchers[i]);
+            _isWatcher[watchers[i]] = true;
         }
     }
 
     // ============= Modifiers =============
     modifier onlyWatcher() {
-        require(hasRole(OPTIMISTIC_ISM_WATCHER_ROLE, msg.sender), "!watcher");
+        require(isWatcher(msg.sender), "!watcher");
         _;
     }
 
@@ -93,9 +95,32 @@ contract StaticOptimisticIsm is
         require(!fraudulent[ism][msg.sender], "already fraudulent");
         fraudulent[ism][msg.sender] = true;
         fraudulentCounter[ism]++;
+
+        emit MarkedFraudulent(ism, msg.sender);
     }
 
     // ============ Public Functions ============
+
+    /**
+     * @inheritdoc AbstractOptimisticIsm
+     */
+    function isWatcher(bytes calldata, address _watcher)
+        public
+        view
+        override
+        returns (bool)
+    {
+        return isWatcher(_watcher);
+    }
+
+    /**
+     * @notice Returns whether an address is a watcher for this ISM
+     * @param _watcher The address to check
+     * @return Whether the address is a watcher
+     */
+    function isWatcher(address _watcher) public view returns (bool) {
+        return _isWatcher[_watcher];
+    }
 
     /**
      * @notice Returns the currently active ISM
@@ -131,7 +156,11 @@ contract StaticOptimisticIsm is
     }
 
     function _setFraudWindowDuration(uint256 _fraudWindowDuration) internal {
-        require(_fraudWindowDuration > 0, "window==0");
+        require(
+            MIN_FRAUD_WINDOW <= _fraudWindowDuration &&
+                _fraudWindowDuration <= MAX_FRAUD_WINDOW,
+            "fraudOutOfBounds"
+        );
         staticFraudWindow = uint96(_fraudWindowDuration);
         emit FraudWindowSet(_fraudWindowDuration);
     }
