@@ -27,8 +27,6 @@ abstract contract AbstractOptimisticIsm is IOptimisticIsm {
     // key = keccak256(abi.encodePacked(_message, _submodule))
     mapping(bytes32 => uint256) public preVerifyTimestamps;
 
-    // ============= Structs =============
-
     // ============ Constants ============
 
     // solhint-disable-next-line const-name-snakecase
