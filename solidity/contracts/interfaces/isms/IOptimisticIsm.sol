@@ -20,4 +20,13 @@ interface IOptimisticIsm is IInterchainSecurityModule {
      * @param ism The address of ISM to mark as fraudulent
      */
     function markFraudulent(address ism) external;
+
+    /**
+     * @notice Returns the address of the ISM responsible for verifying given message
+     * @param _message Formatted Hyperlane message (see Message.sol).
+     */
+    function submodule(bytes calldata _message)
+        external
+        view
+        returns (IInterchainSecurityModule);
 }

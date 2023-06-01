@@ -23,14 +23,11 @@ abstract contract AbstractOptimisticIsm is IOptimisticIsm {
     // Mapping to count the unique number of times an ISM has been flagged as fraudulent
     mapping(address => uint256) public fraudulentCounter;
 
-    // Mapping to store pre-verification data of a message using its ID
-    mapping(bytes32 => PreVerificationData) public preVerification;
+    // Mapping to store the timestamp of when a message was pre-verified by a submodule
+    // key = keccak256(abi.encodePacked(_message, _submodule))
+    mapping(bytes32 => uint256) public preVerifyTimestamps;
 
     // ============= Structs =============
-    struct PreVerificationData {
-        address submodule;
-        uint96 timestamp;
-    }
 
     // ============ Constants ============
 
@@ -106,46 +103,40 @@ abstract contract AbstractOptimisticIsm is IOptimisticIsm {
         returns (bool)
     {
         IInterchainSecurityModule _submodule = submodule(_message);
-        require(
-            _submodule != IInterchainSecurityModule(address(0)),
-            "!submodule"
-        );
-        bytes32 _id = Message.id(_message);
-        PreVerificationData memory _pvd = preVerification[_id];
-        require(_pvd.submodule == address(0), "preVerified");
-        preVerification[_id] = PreVerificationData({
-            submodule: address(_submodule),
-            timestamp: uint96(block.timestamp)
-        });
+        require(address(_submodule) != address(0), "!submodule");
+        bytes32 _key = keccak256(abi.encodePacked(_message, _submodule));
+        require(preVerifyTimestamps[_key] == 0, "preVerified");
+        preVerifyTimestamps[_key] = block.timestamp;
         require(_submodule.verify(_metadata, _message), "!verify");
         return true;
     }
 
     /**
-     * @notice Routes _metadata and _message to the correct ISM
+     * @notice Verifies _message using the currently configuered submodule with optimistic verification
      * @dev For optimistic verification to succeed three conditions must be satisfied
-     * 1. the message was pre-verfied by the submodule
+     * 1. the message was pre-verfied by the currently configured submodule
      * 2. the submodule used to pre-verify the message has not been flagged as compromised by m-of-n watchers
      * 3. fraud window has elapsed
      * @param _message Formatted Hyperlane message (see Message.sol).
      */
     function verify(bytes calldata, bytes calldata _message)
         public
+        view
         returns (bool)
     {
-        bytes32 _id = Message.id(_message);
-        PreVerificationData memory _pvd = preVerification[_id];
-        require(_pvd.timestamp > 0, "!isPreVerified");
+        IInterchainSecurityModule _submodule = submodule(_message);
+        bytes32 _key = keccak256(abi.encodePacked(_message, _submodule));
+        uint256 _preVerifyTimestamp = preVerifyTimestamps[_key];
+        require(_preVerifyTimestamp > 0, "!isPreVerified");
         require(
-            _pvd.timestamp + fraudWindow(_message) < block.timestamp,
+            _preVerifyTimestamp + fraudWindow(_message) < block.timestamp,
             "!fraudWindow"
         );
         (, uint8 _threshold) = watchersAndThreshold(_message);
         require(
-            fraudulentCounter[_pvd.submodule] < _threshold,
+            fraudulentCounter[address(_submodule)] < _threshold,
             "!fraudThreshold"
         );
-        delete preVerification[_id];
         return true;
     }
 }

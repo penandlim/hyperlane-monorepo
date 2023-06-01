@@ -14,6 +14,7 @@ contract OptimisticIsmTest is Test {
     StaticOptimisticIsm ism;
     address submodule;
     bytes metadata;
+    bytes testMessage = "";
 
     function setUp() public {
         factory = new StaticOptimisticIsmFactory();
@@ -109,7 +110,7 @@ contract OptimisticIsmTest is Test {
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
         (address[] memory actualWatchers, uint8 actualThreshold) = ism
-            .watchersAndThreshold("");
+            .watchersAndThreshold(testMessage);
         assertEq(abi.encode(actualWatchers), abi.encode(expectedWatchers));
         assertEq(actualThreshold, m);
     }
@@ -125,7 +126,7 @@ contract OptimisticIsmTest is Test {
 
         address newSubmodule = address(new TestIsm(""));
         ism.setSubmodule(newSubmodule);
-        assertTrue(address(ism.submodule("")) == newSubmodule);
+        assertTrue(address(ism.submodule(testMessage)) == newSubmodule);
     }
 
     function testSetSubmodule_revertsWhenNonOwner(
@@ -223,7 +224,23 @@ contract OptimisticIsmTest is Test {
         deployOptimisticIsmWithWatchers(m, n, seed);
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
-        assertTrue(ism.preVerify(metadata, ""));
+        assertTrue(ism.preVerify(metadata, testMessage));
+    }
+
+    function testPreVerify_worksWithSameMessageAfterSubmoduleUpdate(
+        uint8 m,
+        uint8 n,
+        bytes32 seed
+    ) public {
+        vm.assume(0 < m && m <= n && n < 10);
+        deployOptimisticIsmWithWatchers(m, n, seed);
+        ism.initialize(address(this), submodule, FRAUD_WINDOW);
+
+        assertTrue(ism.preVerify(metadata, testMessage));
+        ism.setSubmodule(address(new TestIsm(metadata)));
+        assertTrue(ism.preVerify(metadata, testMessage));
+        vm.expectRevert(bytes("preVerified"));
+        ism.preVerify(metadata, testMessage);
     }
 
     function testPreVerify_revertsWithDuplicateMessage(
@@ -235,9 +252,9 @@ contract OptimisticIsmTest is Test {
         deployOptimisticIsmWithWatchers(m, n, seed);
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
-        assertTrue(ism.preVerify(metadata, ""));
+        assertTrue(ism.preVerify(metadata, testMessage));
         vm.expectRevert(bytes("preVerified"));
-        ism.preVerify(metadata, "");
+        ism.preVerify(metadata, testMessage);
     }
 
     function testPreVerify_revertsWithWrongMetadata(
@@ -252,7 +269,7 @@ contract OptimisticIsmTest is Test {
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
         vm.expectRevert(bytes("!verify"));
-        ism.preVerify(wrongMetadata, "");
+        ism.preVerify(wrongMetadata, testMessage);
     }
 
     function testVerify_revertsWithoutPreVerify(
@@ -265,7 +282,7 @@ contract OptimisticIsmTest is Test {
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
         vm.expectRevert(bytes("!isPreVerified"));
-        ism.verify(metadata, "");
+        ism.verify(metadata, testMessage);
     }
 
     function testVerify_revertsBeforeFraudWindowCloses(
@@ -279,11 +296,11 @@ contract OptimisticIsmTest is Test {
         deployOptimisticIsmWithWatchers(m, n, seed);
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
-        ism.preVerify(metadata, "");
+        ism.preVerify(metadata, testMessage);
         // skip the fraud window timestamp
         vm.warp(block.timestamp + waitDuration);
         vm.expectRevert(bytes("!fraudWindow"));
-        ism.verify(metadata, "");
+        ism.verify(metadata, testMessage);
     }
 
     function testVerify_revertsIfSubmoduleIsFraudulent(
@@ -295,7 +312,7 @@ contract OptimisticIsmTest is Test {
         address[] memory watchers = deployOptimisticIsmWithWatchers(m, n, seed);
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
-        ism.preVerify(metadata, "");
+        ism.preVerify(metadata, testMessage);
         // call markFraudulent for m watchers
         for (uint256 i = 0; i < m; i++) {
             vm.prank(watchers[i]);
@@ -303,7 +320,26 @@ contract OptimisticIsmTest is Test {
         }
         vm.warp(block.timestamp + FRAUD_WINDOW + 1);
         vm.expectRevert(bytes("!fraudThreshold"));
-        ism.verify(metadata, "");
+        ism.verify(metadata, testMessage);
+    }
+
+    function testVerify_revertsIfSubmoduleHasChangedSincePreVerify(
+        uint8 m,
+        uint8 n,
+        bytes32 seed
+    ) public {
+        vm.assume(0 < m && m <= n && n < 10);
+        deployOptimisticIsmWithWatchers(m, n, seed);
+        ism.initialize(address(this), submodule, FRAUD_WINDOW);
+        ism.preVerify(metadata, testMessage);
+
+        // Change submodule address
+        vm.prank(ism.owner());
+        ism.setSubmodule(address(0xdeadbeef));
+
+        vm.warp(block.timestamp + FRAUD_WINDOW + 1);
+        vm.expectRevert(bytes("!isPreVerified"));
+        ism.verify(metadata, testMessage);
     }
 
     function testVerify(
@@ -315,14 +351,14 @@ contract OptimisticIsmTest is Test {
         address[] memory watchers = deployOptimisticIsmWithWatchers(m, n, seed);
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
-        ism.preVerify(metadata, "");
+        ism.preVerify(metadata, testMessage);
         // call markFraudulent for m - 1 watchers
         for (uint256 i = 0; i < m - 1; i++) {
             vm.prank(watchers[i]);
             ism.markFraudulent(submodule);
         }
         vm.warp(block.timestamp + FRAUD_WINDOW + 1);
-        assertTrue(ism.verify(metadata, ""));
+        assertTrue(ism.verify(metadata, testMessage));
     }
 
     function testVerify_passesWithEmptyMetadata(
@@ -334,8 +370,8 @@ contract OptimisticIsmTest is Test {
         deployOptimisticIsmWithWatchers(m, n, seed);
         ism.initialize(address(this), submodule, FRAUD_WINDOW);
 
-        ism.preVerify(metadata, "");
+        ism.preVerify(metadata, testMessage);
         vm.warp(block.timestamp + FRAUD_WINDOW + 1);
-        assertTrue(ism.verify("", ""));
+        assertTrue(ism.verify("", testMessage));
     }
 }
